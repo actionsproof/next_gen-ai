@@ -26,6 +26,26 @@ variable "allow_unauthenticated" {
   type        = bool
   default     = true
 }
+variable "custom_domain" {
+  description = "Optional custom domain mapped to primary environment service (e.g. api.example.com)"
+  type        = string
+  default     = ""
+}
+variable "dns_create_zone" {
+  description = "If true, create a managed DNS zone for the domain root"
+  type        = bool
+  default     = false
+}
+variable "dns_zone_domain" {
+  description = "Base DNS domain for zone (e.g. example.com)"
+  type        = string
+  default     = ""
+}
+variable "dns_zone_name" {
+  description = "Name for managed zone (Terraform identifier)"
+  type        = string
+  default     = "nextgen-ai-zone"
+}
 variable "enable_uptime" {
   description = "Enable Monitoring uptime checks and alert policy"
   type        = bool
@@ -70,6 +90,40 @@ resource "google_cloud_run_service_iam_member" "invoker" {
   service  = google_cloud_run_service.svc[each.key].name
   role     = "roles/run.invoker"
   member   = "allUsers"
+}
+
+# Optional managed DNS zone (authoritative). Only creates if requested.
+resource "google_dns_managed_zone" "primary" {
+  count       = var.dns_create_zone && var.dns_zone_domain != "" ? 1 : 0
+  name        = var.dns_zone_name
+  dns_name    = "${var.dns_zone_domain}." # must end with dot
+  description = "Managed zone for ${var.dns_zone_domain}"
+}
+
+# Custom domain mapping to prod (or first env) service.
+resource "google_cloud_run_domain_mapping" "custom" {
+  count    = var.custom_domain != "" ? 1 : 0
+  name     = var.custom_domain
+  location = var.region
+  metadata {
+    namespace = var.project_id
+  }
+  spec {
+    route_name = google_cloud_run_service.svc["prod"].name
+  }
+  depends_on = [google_cloud_run_service.svc]
+}
+
+# DNS record (CNAME) pointing custom subdomain to Cloud Run domain target if zone created.
+# Cloud Run domain mapping returns resource status with records needed; simplest assumption uses CNAME to ghs.googlehosted.com
+resource "google_dns_record_set" "custom_cname" {
+  count      = var.custom_domain != "" && var.dns_create_zone && var.dns_zone_domain != "" ? 1 : 0
+  name       = "${var.custom_domain}." # FQDN must end with dot
+  type       = "CNAME"
+  ttl        = 300
+  managed_zone = google_dns_managed_zone.primary[0].name
+  rrdatas    = ["ghs.googlehosted.com."]
+  depends_on = [google_cloud_run_domain_mapping.custom]
 }
 
 # Uptime checks per environment (optional)
@@ -132,4 +186,12 @@ output "primary_service_url" {
 output "uptime_check_ids" {
   value       = var.enable_uptime ? { for k, v in google_monitoring_uptime_check_config.http : k => v.id } : {}
   description = "Map of environment to uptime check config IDs"
+}
+output "custom_domain" {
+  value       = var.custom_domain
+  description = "Configured custom domain (if any)"
+}
+output "dns_zone_name" {
+  value       = var.dns_create_zone ? google_dns_managed_zone.primary[0].name : null
+  description = "Managed DNS zone name (if created)"
 }
