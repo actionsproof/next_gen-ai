@@ -1,0 +1,12 @@
+# Go build
+bin/
+*.exe
+*.test
+coverage.out
+
+# Terraform
+*.tfstate*
+.terraform/
+
+# Logs
+*.log
