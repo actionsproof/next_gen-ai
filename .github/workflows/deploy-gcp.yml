@@ -1,0 +1,42 @@
+name: deploy-gcp
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (e.g. prod, staging)"
+        required: true
+        default: prod
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      REGION: us-central1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+      - name: Configure Docker auth
+        run: gcloud auth configure-docker us-docker.pkg.dev
+      - name: Build image
+        run: |
+          IMAGE=us-docker.pkg.dev/$PROJECT_ID/nextgen-ai/nextgen-ai:${{ github.sha }}
+          docker build -t $IMAGE .
+          docker push $IMAGE
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+        id: build
+      - name: Deploy Cloud Run
+        run: |
+          gcloud run deploy nextgen-ai-${{ inputs.environment }} \
+            --image=${{ steps.build.outputs.image }} \
+            --region=$REGION \
+            --platform=managed \
+            --allow-unauthenticated \
+            --quiet
+      - name: Show URL
+        run: gcloud run services describe nextgen-ai-${{ inputs.environment }} --region $REGION --format 'value(status.url)'

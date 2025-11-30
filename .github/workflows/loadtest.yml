@@ -1,0 +1,23 @@
+name: loadtest
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Base URL of deployed service"
+        required: true
+        default: "https://example.run.app"
+      api_key:
+        description: "API key if required"
+        required: false
+jobs:
+  k6:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run k6 test
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: loadtest/script.js
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          API_KEY: ${{ inputs.api_key }}

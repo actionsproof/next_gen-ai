@@ -1,0 +1,30 @@
+name: infra-apply
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Container image tag to deploy"
+        required: true
+        default: latest
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      REGION: us-central1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+      - name: Terraform init/plan/apply
+        working-directory: infra/terraform
+        run: |
+          terraform init
+          terraform plan -var project_id=$PROJECT_ID -var image="us-docker.pkg.dev/$PROJECT_ID/nextgen-ai/nextgen-ai:${{ inputs.image_tag }}"
+          terraform apply -auto-approve -var project_id=$PROJECT_ID -var image="us-docker.pkg.dev/$PROJECT_ID/nextgen-ai/nextgen-ai:${{ inputs.image_tag }}"

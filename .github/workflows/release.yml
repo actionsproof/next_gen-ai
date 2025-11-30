@@ -1,0 +1,36 @@
+name: release
+on:
+  push:
+    tags:
+      - 'v*'
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Build matrix
+        run: |
+          set -e
+          VERSION=${GITHUB_REF##*/}
+          COMMIT=$(git rev-parse --short HEAD)
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          mkdir -p dist
+          for GOOS in linux windows; do
+            for GOARCH in amd64 arm64; do
+              BIN_NAME=nextgen-ai
+              EXT=""
+              if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
+              OUT="dist/${BIN_NAME}_${VERSION}_${GOOS}_${GOARCH}${EXT}"
+              echo "Building $OUT";
+              GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -ldflags "-X main.Version=$VERSION -X main.Commit=$COMMIT -X main.Date=$DATE" -o "$OUT" ./cmd/server
+            done
+          done
+          (cd dist && shasum -a 256 * > SHA256SUMS.txt)
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: dist/

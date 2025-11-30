@@ -1,0 +1,62 @@
+name: canary-deploy
+on:
+  workflow_dispatch:
+    inputs:
+      base_environment:
+        description: "Base environment (e.g. prod)"
+        required: true
+        default: prod
+      canary_percent:
+        description: "Percent traffic to canary"
+        required: true
+        default: "10"
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      REGION: us-central1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+      - name: Configure Docker auth
+        run: gcloud auth configure-docker us-docker.pkg.dev
+      - name: Build image
+        run: |
+          IMAGE=us-docker.pkg.dev/$PROJECT_ID/nextgen-ai/nextgen-ai:${{ github.sha }}
+          docker build -t $IMAGE .
+          docker push $IMAGE
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+        id: build
+      - name: Deploy canary revision
+        run: |
+          SERVICE=nextgen-ai-${{ inputs.base_environment }}
+          gcloud run deploy $SERVICE \
+            --image=${{ steps.build.outputs.image }} \
+            --region=$REGION \
+            --platform=managed \
+            --quiet
+      - name: Fetch revisions
+        id: revs
+        run: |
+          SERVICE=nextgen-ai-${{ inputs.base_environment }}
+          gcloud run services describe $SERVICE --region $REGION --format json > svc.json
+          jq -r '.status.traffic[].revisionName' svc.json > revisions.txt
+          cat revisions.txt
+          CANARY=$(head -n1 revisions.txt)
+          STABLE=$(tail -n1 revisions.txt)
+          echo "canary=$CANARY" >> $GITHUB_OUTPUT
+          echo "stable=$STABLE" >> $GITHUB_OUTPUT
+      - name: Apply traffic split
+        run: |
+          SERVICE=nextgen-ai-${{ inputs.base_environment }}
+          gcloud run services update-traffic $SERVICE \
+            --region $REGION \
+            --to-revisions "${{ steps.revs.outputs.canary }}=${{ inputs.canary_percent }},${{ steps.revs.outputs.stable }}=$(expr 100 - ${{ inputs.canary_percent }})" \
+            --quiet
