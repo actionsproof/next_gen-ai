@@ -26,6 +26,16 @@ variable "allow_unauthenticated" {
   type        = bool
   default     = true
 }
+variable "enable_uptime" {
+  description = "Enable Monitoring uptime checks and alert policy"
+  type        = bool
+  default     = true
+}
+variable "alert_email" {
+  description = "Email for uptime alert notifications (optional)"
+  type        = string
+  default     = ""
+}
 
 resource "google_cloud_run_service" "svc" {
   for_each = toset(var.environments)
@@ -62,6 +72,53 @@ resource "google_cloud_run_service_iam_member" "invoker" {
   member   = "allUsers"
 }
 
+# Uptime checks per environment (optional)
+resource "google_monitoring_uptime_check_config" "http" {
+  for_each    = var.enable_uptime ? google_cloud_run_service.svc : {}
+  display_name = "uptime-${each.key}"
+  timeout      = "10s"
+  period       = "60s"
+  http_check {
+    path    = "/healthz"
+    port    = 443
+    use_ssl = true
+  }
+  monitored_resource {
+    type = "uptime_url"
+    labels = {
+      project_id = var.project_id
+      host       = replace(google_cloud_run_service.svc[each.key].status[0].url, "https://", "")
+    }
+  }
+}
+
+resource "google_monitoring_notification_channel" "email" {
+  count        = var.enable_uptime && var.alert_email != "" ? 1 : 0
+  display_name = "uptime-email"
+  type         = "email"
+  labels = {
+    email_address = var.alert_email
+  }
+}
+
+resource "google_monitoring_alert_policy" "uptime" {
+  count       = var.enable_uptime ? 1 : 0
+  display_name = "Cloud Run uptime"
+  combiner     = "OR"
+  conditions {
+    display_name = "uptime-failure"
+    condition_threshold {
+      filter          = "metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" resource.type=\"uptime_url\""
+      comparison      = "COMPARISON_LT"
+      threshold_value = 1
+      duration        = "0s"
+      trigger { count = 1 }
+    }
+  }
+  notification_channels = var.alert_email != "" && var.enable_uptime ? [google_monitoring_notification_channel.email[0].name] : []
+  depends_on = [google_monitoring_uptime_check_config.http]
+}
+
 variable "image" { type = string }
 
 output "service_urls" {
@@ -71,4 +128,8 @@ output "service_urls" {
 output "primary_service_url" {
   value = google_cloud_run_service.svc["prod"].status[0].url
   description = "Convenience output for prod URL"
+}
+output "uptime_check_ids" {
+  value       = var.enable_uptime ? { for k, v in google_monitoring_uptime_check_config.http : k => v.id } : {}
+  description = "Map of environment to uptime check config IDs"
 }

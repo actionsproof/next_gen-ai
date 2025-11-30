@@ -10,10 +10,13 @@ This configuration deploys one Cloud Run service per environment (default only `
 - `environments` (list(string)): Environment names (default `["prod"]`).
 - `allow_unauthenticated` (bool): If true, grants public invoker (`allUsers`).
 - `api_key` (string): Optional API key injected as env var `API_KEY`.
+- `enable_uptime` (bool): Enable uptime checks + alert (default `true`).
+- `alert_email` (string): Email for notification channel (optional).
 
 ## Outputs
 - `service_urls`: Map of environment -> URL.
 - `primary_service_url`: Convenience prod URL.
+- `uptime_check_ids`: Map env -> uptime check config IDs (when enabled).
 
 ## Example
 ```sh
@@ -23,7 +26,9 @@ terraform apply \
 	-var image="us-docker.pkg.dev/next-gen-ai-479815/nextgen-ai/nextgen-ai:abcdef" \
 	-var environments='["staging","prod"]' \
 	-var allow_unauthenticated=false \
-	-var api_key="YOUR_API_KEY"
+	-var api_key="YOUR_API_KEY" \
+	-var enable_uptime=true \
+	-var alert_email="alerts@example.com"
 ```
 
 Then invoke (authenticated example using IAM if unauth disabled):
